@@ -45,31 +45,31 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="w-full">
-      <div className="text-center mb-8">
-        <div className="lg:hidden flex justify-center mb-4">
+    <div className="w-full max-w-sm mx-auto">
+      <div className="text-center mb-10">
+        <div className="lg:hidden flex justify-center mb-6">
           <img 
             src="/images/kwooka_mascot_clean.png" 
             alt="Kwooka" 
-            className="h-20 w-20 object-contain"
+            className="h-24 w-24 object-contain"
           />
         </div>
-        <h1 className="text-2xl font-bold text-slate-900">Welcome Back</h1>
-        <p className="text-muted-foreground mt-1">Sign in to your Kwooka Platform</p>
+        <h1 className="text-3xl font-bold text-slate-900">Welcome Back</h1>
+        <p className="text-slate-500 mt-2">Sign in to your Kwooka Platform</p>
       </div>
 
-      <form onSubmit={handleLogin} className="space-y-4">
+      <form onSubmit={handleLogin} className="space-y-5">
         <div className="space-y-2">
-          <Label htmlFor="email">Email</Label>
+          <Label htmlFor="email" className="text-slate-700 font-medium">Email</Label>
           <div className="relative">
-            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
             <Input
               id="email"
               type="email"
               placeholder="you@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="pl-10"
+              className="pl-11 h-12 text-base border-slate-200 focus:border-amber-500 focus:ring-amber-500"
               required
             />
           </div>
@@ -77,34 +77,34 @@ export default function LoginPage() {
         
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <Label htmlFor="password">Password</Label>
-            <Link href="/auth/reset-password" className="text-xs text-amber-600 hover:underline">
+            <Label htmlFor="password" className="text-slate-700 font-medium">Password</Label>
+            <Link href="/auth/reset-password" className="text-sm text-amber-600 hover:text-amber-700 hover:underline">
               Forgot password?
             </Link>
           </div>
           <div className="relative">
-            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
             <Input
               id="password"
               type={showPassword ? 'text' : 'password'}
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="pl-10 pr-10"
+              className="pl-11 pr-11 h-12 text-base border-slate-200 focus:border-amber-500 focus:ring-amber-500"
               required
             />
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
             >
-              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
             </button>
           </div>
         </div>
 
         {error && (
-          <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm">
+          <div className="bg-red-50 text-red-600 p-4 rounded-lg text-sm border border-red-100">
             {error}
           </div>
         )}
@@ -112,11 +112,11 @@ export default function LoginPage() {
         <button 
           type="submit" 
           disabled={loading}
-          className="w-full py-3 px-4 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-lg disabled:opacity-50 transition-colors"
+          className="w-full h-12 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-lg disabled:opacity-50 transition-all shadow-lg shadow-amber-600/20 hover:shadow-amber-600/30"
         >
           {loading ? (
             <span className="flex items-center justify-center">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
               Signing in...
             </span>
           ) : (
@@ -125,21 +125,12 @@ export default function LoginPage() {
         </button>
       </form>
 
-      <div className="mt-6 text-center text-sm">
-        <p className="text-muted-foreground">
-          Don&apos;t have an account?{' '}
-          <Link href="/auth/signup" className="text-amber-600 hover:underline font-medium">
-            Sign up
-          </Link>
-        </p>
-      </div>
-      
-      {/* Demo Login Info */}
-      <div className="mt-8 p-4 bg-slate-50 rounded-lg border">
-        <p className="text-xs text-center text-muted-foreground mb-2">Demo Account</p>
-        <p className="text-sm text-center font-mono">demo@kwooka.com.au</p>
-        <p className="text-sm text-center font-mono">demo123</p>
-      </div>
+      <p className="mt-8 text-center text-slate-500">
+        Don&apos;t have an account?{' '}
+        <Link href="/auth/signup" className="text-amber-600 hover:text-amber-700 font-semibold hover:underline">
+          Sign up
+        </Link>
+      </p>
     </div>
   )
 }

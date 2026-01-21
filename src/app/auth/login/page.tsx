@@ -112,7 +112,7 @@ export default function LoginPage() {
 
         <Button 
           type="submit" 
-          className="w-full bg-kwooka-ochre hover:bg-kwooka-ochre/90"
+          className="w-full bg-amber-600 hover:bg-amber-700 text-white"
           disabled={loading}
         >
           {loading ? (

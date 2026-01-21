@@ -3,7 +3,6 @@
 import React, { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Loader2, Mail, Lock, Eye, EyeOff } from 'lucide-react'
@@ -79,7 +78,7 @@ export default function LoginPage() {
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label htmlFor="password">Password</Label>
-            <Link href="/auth/reset-password" className="text-xs text-kwooka-ochre hover:underline">
+            <Link href="/auth/reset-password" className="text-xs text-amber-600 hover:underline">
               Forgot password?
             </Link>
           </div>
@@ -110,23 +109,26 @@ export default function LoginPage() {
           </div>
         )}
 
-        <Button 
+        <button 
           type="submit" 
-          className="w-full bg-amber-600 hover:bg-amber-700 text-white"
           disabled={loading}
+          className="w-full py-3 px-4 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-lg disabled:opacity-50 transition-colors"
         >
           {loading ? (
-            <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Signing in...</>
+            <span className="flex items-center justify-center">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Signing in...
+            </span>
           ) : (
             'Sign In'
           )}
-        </Button>
+        </button>
       </form>
 
       <div className="mt-6 text-center text-sm">
         <p className="text-muted-foreground">
-          Don't have an account?{' '}
-          <Link href="/auth/signup" className="text-kwooka-ochre hover:underline font-medium">
+          Don&apos;t have an account?{' '}
+          <Link href="/auth/signup" className="text-amber-600 hover:underline font-medium">
             Sign up
           </Link>
         </p>

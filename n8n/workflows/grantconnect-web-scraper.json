@@ -1,0 +1,159 @@
+{
+  "name": "Kwooka - GrantConnect Web Scraper",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 12
+            }
+          ]
+        }
+      },
+      "id": "schedule",
+      "name": "Run Every 12 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "url": "https://www.grants.gov.au/go/list",
+        "options": {}
+      },
+      "id": "fetch-page",
+      "name": "Fetch Grant List Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the HTML to extract grant links\nconst html = $input.first().json.data || $input.first().json.body || '';\n\n// Extract grant IDs and basic info from the list page\nconst grantPattern = /Go\\/Show\\?GoUuid=([a-f0-9-]+)/gi;\nconst grants = [];\nlet match;\n\nwhile ((match = grantPattern.exec(html)) !== null) {\n  grants.push({\n    uuid: match[1],\n    url: `https://www.grants.gov.au/Go/Show?GoUuid=${match[1]}`\n  });\n}\n\n// Deduplicate\nconst unique = [...new Map(grants.map(g => [g.uuid, g])).values()];\n\nreturn unique.slice(0, 50).map(g => ({ json: g })); // Limit to 50 per run"
+      },
+      "id": "extract-links",
+      "name": "Extract Grant Links",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {
+          "reset": false
+        }
+      },
+      "id": "batch",
+      "name": "Process in Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "fetch-detail",
+      "name": "Fetch Grant Detail",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "amount": 1,
+        "unit": "seconds"
+      },
+      "id": "wait",
+      "name": "Rate Limit Wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1100, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse grant detail page HTML\nconst html = $input.first().json.data || $input.first().json.body || '';\nconst url = $input.first().json.url || '';\nconst uuid = url.match(/GoUuid=([a-f0-9-]+)/i)?.[1] || '';\n\n// Helper to extract text between patterns\nfunction extractBetween(html, startPattern, endPattern) {\n  const startMatch = html.match(startPattern);\n  if (!startMatch) return null;\n  const startIndex = startMatch.index + startMatch[0].length;\n  const endMatch = html.slice(startIndex).match(endPattern);\n  if (!endMatch) return null;\n  return html.slice(startIndex, startIndex + endMatch.index).trim();\n}\n\n// Helper to clean HTML\nfunction cleanHtml(str) {\n  if (!str) return '';\n  return str\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/&nbsp;/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/&lt;/g, '<')\n    .replace(/&gt;/g, '>')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\n// Extract fields\nconst title = cleanHtml(extractBetween(html, /<h1[^>]*>/i, /<\\/h1>/i)) || \n              cleanHtml(extractBetween(html, /class=\"go-title\"[^>]*>/i, /<\\//i)) || \n              'Unknown Grant';\n\nconst goId = extractBetween(html, /GO ID[:\\s]*/i, /[<\\n]/) ||\n             extractBetween(html, /goId[\"']?\\s*:\\s*[\"']?/i, /[\"'<,]/);\n\nconst agency = cleanHtml(extractBetween(html, /Agency[:\\s]*/i, /<\\//i)) ||\n              cleanHtml(extractBetween(html, /Department[:\\s]*/i, /<\\//i));\n\nconst description = cleanHtml(extractBetween(html, /Description[:\\s]*<[^>]+>/i, /<\\/div>/i)) ||\n                   cleanHtml(extractBetween(html, /class=\"description\"[^>]*>/i, /<\\//i));\n\nconst closeDate = extractBetween(html, /Close Date[^:]*:[\\s]*/i, /[<\\n]/) ||\n                  extractBetween(html, /Closing[^:]*:[\\s]*/i, /[<\\n]/);\n\nconst category = cleanHtml(extractBetween(html, /Category[:\\s]*/i, /<\\//i)) ||\n                cleanHtml(extractBetween(html, /Primary Category[:\\s]*/i, /<\\//i));\n\nconst fundingText = extractBetween(html, /Funding[^:]*:[\\s]*/i, /[<\\n]/) ||\n                    extractBetween(html, /Value[^:]*:[\\s]*/i, /[<\\n]/) || '';\n\n// Parse funding amounts\nconst fundingMatch = fundingText.match(/\\$?([\\d,]+)(?:\\s*-\\s*\\$?([\\d,]+))?/i);\nconst fundingMin = fundingMatch ? parseInt(fundingMatch[1].replace(/,/g, ''), 10) : null;\nconst fundingMax = fundingMatch && fundingMatch[2] ? \n                   parseInt(fundingMatch[2].replace(/,/g, ''), 10) : fundingMin;\n\n// Parse close date\nfunction parseDate(dateStr) {\n  if (!dateStr || /ongoing/i.test(dateStr)) return null;\n  try {\n    const date = new Date(dateStr);\n    return isNaN(date.getTime()) ? null : date.toISOString().split('T')[0];\n  } catch {\n    return null;\n  }\n}\n\nconst grant = {\n  external_id: goId || uuid,\n  source: 'grantconnect',\n  source_url: `https://www.grants.gov.au/Go/Show?GoUuid=${uuid}`,\n  title: title,\n  description: description.slice(0, 2000),\n  provider: agency,\n  provider_type: 'federal',\n  funding_amount_min: fundingMin,\n  funding_amount_max: fundingMax,\n  funding_type: 'grant',\n  close_date: parseDate(closeDate),\n  status: /ongoing/i.test(closeDate) ? 'ongoing' : 'open',\n  is_ongoing: /ongoing/i.test(closeDate),\n  category: category || 'General',\n  states: ['national'],\n  last_scraped_at: new Date().toISOString()\n};\n\nreturn [{ json: grant }];"
+      },
+      "id": "parse-detail",
+      "name": "Parse Grant Detail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 0]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": "public",
+        "table": "grants",
+        "conflictColumns": "external_id,source",
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        }
+      },
+      "id": "save-grant",
+      "name": "Save to Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1540, 0],
+      "credentials": {
+        "supabaseApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "loop-back",
+      "name": "Continue Loop",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1760, 0]
+    }
+  ],
+  "connections": {
+    "Run Every 12 Hours": {
+      "main": [[{ "node": "Fetch Grant List Page", "type": "main", "index": 0 }]]
+    },
+    "Fetch Grant List Page": {
+      "main": [[{ "node": "Extract Grant Links", "type": "main", "index": 0 }]]
+    },
+    "Extract Grant Links": {
+      "main": [[{ "node": "Process in Batches", "type": "main", "index": 0 }]]
+    },
+    "Process in Batches": {
+      "main": [
+        [{ "node": "Fetch Grant Detail", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Fetch Grant Detail": {
+      "main": [[{ "node": "Rate Limit Wait", "type": "main", "index": 0 }]]
+    },
+    "Rate Limit Wait": {
+      "main": [[{ "node": "Parse Grant Detail", "type": "main", "index": 0 }]]
+    },
+    "Parse Grant Detail": {
+      "main": [[{ "node": "Save to Supabase", "type": "main", "index": 0 }]]
+    },
+    "Save to Supabase": {
+      "main": [[{ "node": "Continue Loop", "type": "main", "index": 0 }]]
+    },
+    "Continue Loop": {
+      "main": [[{ "node": "Process in Batches", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

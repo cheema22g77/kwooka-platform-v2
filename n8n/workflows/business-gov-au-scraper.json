@@ -1,0 +1,149 @@
+{
+  "name": "Kwooka - Business.gov.au Scraper",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "hours", "hoursInterval": 24 }]
+        }
+      },
+      "id": "schedule",
+      "name": "Run Daily",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "url": "https://business.gov.au/grants-and-programs",
+        "options": {
+          "response": { "response": { "responseFormat": "text" } }
+        }
+      },
+      "id": "fetch-main",
+      "name": "Fetch Main Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract grant program links from business.gov.au\nconst html = $input.first().json.data || $input.first().json.body || '';\nconst baseUrl = 'https://business.gov.au';\n\n// Find grant links\nconst linkPattern = /href=\"(\\/grants-and-programs\\/[^\"]+)\"/gi;\nconst grants = [];\nlet match;\n\nwhile ((match = linkPattern.exec(html)) !== null) {\n  const path = match[1];\n  // Skip category/filter pages\n  if (!/finder|filter|search|#/i.test(path)) {\n    grants.push({\n      url: baseUrl + path,\n      path: path\n    });\n  }\n}\n\n// Deduplicate\nconst unique = [...new Map(grants.map(g => [g.path, g])).values()];\n\nconsole.log(`Found ${unique.length} grant programs`);\nreturn unique.map(g => ({ json: g }));"
+      },
+      "id": "extract-links",
+      "name": "Extract Program Links",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "batchSize": 3,
+        "options": {}
+      },
+      "id": "batch",
+      "name": "Batch Processing",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "response": { "response": { "responseFormat": "text" } }
+        }
+      },
+      "id": "fetch-detail",
+      "name": "Fetch Program Detail",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "seconds"
+      },
+      "id": "wait",
+      "name": "Rate Limit",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1100, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse business.gov.au grant detail page\nconst html = $input.first().json.data || $input.first().json.body || '';\nconst url = $input.first().json.url || '';\n\nfunction cleanHtml(str) {\n  if (!str) return '';\n  return str\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/&nbsp;/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction extractMeta(html, name) {\n  const pattern = new RegExp(`<meta[^>]*name=\"${name}\"[^>]*content=\"([^\"]+)\"`, 'i');\n  const match = html.match(pattern);\n  return match ? cleanHtml(match[1]) : null;\n}\n\nfunction extractText(html, pattern, endPattern = /<\\//i) {\n  const match = html.match(pattern);\n  if (!match) return null;\n  const start = match.index + match[0].length;\n  const rest = html.slice(start);\n  const endMatch = rest.match(endPattern);\n  if (!endMatch) return null;\n  return cleanHtml(rest.slice(0, endMatch.index));\n}\n\n// Extract data\nconst title = extractMeta(html, 'dcterms.title') ||\n              extractText(html, /<h1[^>]*>/i, /<\\/h1>/i) ||\n              'Unknown Program';\n\nconst description = extractMeta(html, 'description') ||\n                   extractMeta(html, 'dcterms.description') ||\n                   extractText(html, /class=\"intro\"[^>]*>/i, /<\\/div>/i) || '';\n\n// Try to extract funding info\nconst fundingPattern = /\\$([\\d,]+(?:\\.\\d{2})?)(\\s*(?:to|-)\\s*\\$([\\d,]+(?:\\.\\d{2})?))?/i;\nconst fundingMatch = html.match(fundingPattern);\nlet fundingMin = null, fundingMax = null;\n\nif (fundingMatch) {\n  fundingMin = parseFloat(fundingMatch[1].replace(/,/g, ''));\n  fundingMax = fundingMatch[3] ? parseFloat(fundingMatch[3].replace(/,/g, '')) : fundingMin;\n}\n\n// Extract dates\nconst closeDatePattern = /(?:closes?|closing|deadline)[^<]*?(\\d{1,2}[\\s\\/\\-]\\w+[\\s\\/\\-]\\d{4})/i;\nconst closeMatch = html.match(closeDatePattern);\nlet closeDate = null;\n\nif (closeMatch) {\n  try {\n    const d = new Date(closeMatch[1]);\n    if (!isNaN(d.getTime())) {\n      closeDate = d.toISOString().split('T')[0];\n    }\n  } catch {}\n}\n\n// Determine status\nlet status = 'open';\nif (/closed|no longer available/i.test(html)) {\n  status = 'closed';\n} else if (/ongoing|no closing date/i.test(html)) {\n  status = 'ongoing';\n} else if (/coming soon|not yet open/i.test(html)) {\n  status = 'coming_soon';\n}\n\n// Extract category from URL or content\nconst pathParts = url.split('/');\nconst programSlug = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2];\n\nlet category = 'General';\nif (/export|emdg|trade/i.test(url + title)) category = 'Export';\nelse if (/r&d|research|innovation/i.test(url + title)) category = 'Innovation';\nelse if (/energy|sustainability|environment/i.test(url + title)) category = 'Sustainability';\nelse if (/regional|rural/i.test(url + title)) category = 'Regional';\nelse if (/apprentice|employment|job/i.test(url + title)) category = 'Employment';\nelse if (/tax|write-off|deduction/i.test(url + title)) category = 'Tax';\nelse if (/ndis|disability|health/i.test(url + title)) category = 'Healthcare';\n\nconst grant = {\n  external_id: programSlug,\n  source: 'business_gov_au',\n  source_url: url,\n  title: title.slice(0, 500),\n  description: description.slice(0, 2000),\n  provider: 'business.gov.au',\n  provider_type: 'federal',\n  funding_amount_min: fundingMin,\n  funding_amount_max: fundingMax,\n  funding_type: /tax|rebate/i.test(title) ? 'tax_incentive' : 'grant',\n  close_date: closeDate,\n  status: status,\n  is_ongoing: status === 'ongoing',\n  category: category,\n  states: ['national'],\n  last_scraped_at: new Date().toISOString()\n};\n\nreturn [{ json: grant }];"
+      },
+      "id": "parse-detail",
+      "name": "Parse Program Detail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [{
+            "value1": "={{ $json.title }}",
+            "operation": "isNotEmpty"
+          }]
+        }
+      },
+      "id": "filter-valid",
+      "name": "Filter Valid",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 1,
+      "position": [1540, 0]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": "public",
+        "table": "grants",
+        "conflictColumns": "external_id,source",
+        "columns": { "mappingMode": "autoMapInputData" }
+      },
+      "id": "save",
+      "name": "Save to Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1760, 0],
+      "credentials": {
+        "supabaseApi": { "id": "YOUR_ID", "name": "Supabase" }
+      }
+    }
+  ],
+  "connections": {
+    "Run Daily": {
+      "main": [[{ "node": "Fetch Main Page", "type": "main", "index": 0 }]]
+    },
+    "Fetch Main Page": {
+      "main": [[{ "node": "Extract Program Links", "type": "main", "index": 0 }]]
+    },
+    "Extract Program Links": {
+      "main": [[{ "node": "Batch Processing", "type": "main", "index": 0 }]]
+    },
+    "Batch Processing": {
+      "main": [
+        [{ "node": "Fetch Program Detail", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Fetch Program Detail": {
+      "main": [[{ "node": "Rate Limit", "type": "main", "index": 0 }]]
+    },
+    "Rate Limit": {
+      "main": [[{ "node": "Parse Program Detail", "type": "main", "index": 0 }]]
+    },
+    "Parse Program Detail": {
+      "main": [[{ "node": "Filter Valid", "type": "main", "index": 0 }]]
+    },
+    "Filter Valid": {
+      "main": [[{ "node": "Save to Supabase", "type": "main", "index": 0 }]]
+    },
+    "Save to Supabase": {
+      "main": [[{ "node": "Batch Processing", "type": "main", "index": 0 }]]
+    }
+  }
+}

@@ -1,0 +1,193 @@
+{
+  "name": "Kwooka - GrantConnect Scraper",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Run Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.grants.gov.au/api/go/list",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "fetch-grantconnect",
+      "name": "Fetch GrantConnect API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [220, 0],
+      "notes": "If API not available, use web scraping node instead"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process the grants data from GrantConnect\nconst grants = $input.all();\nconst processedGrants = [];\n\nfor (const item of grants) {\n  const grant = item.json;\n  \n  // Parse and normalize the grant data\n  const processed = {\n    external_id: grant.goId || grant.GO_ID || grant.id,\n    source: 'grantconnect',\n    source_url: `https://www.grants.gov.au/Go/Show?GoUuid=${grant.uuid || grant.goId}`,\n    \n    title: grant.title || grant.Title || '',\n    description: grant.description || grant.Description || '',\n    provider: grant.agency || grant.Agency || grant.agencyName || '',\n    provider_type: 'federal',\n    \n    // Parse funding amounts\n    funding_amount_min: parseAmount(grant.minValue || grant.fundingMin),\n    funding_amount_max: parseAmount(grant.maxValue || grant.fundingMax),\n    funding_type: 'grant',\n    \n    // Parse dates\n    open_date: parseDate(grant.openDate || grant.publishDate),\n    close_date: parseDate(grant.closeDate || grant.closingDate),\n    \n    // Status\n    status: determineStatus(grant),\n    is_ongoing: grant.isOngoing || grant.closeDate === 'Ongoing',\n    \n    // Categories\n    category: grant.primaryCategory || grant.category || 'General',\n    subcategory: grant.secondaryCategory || null,\n    industries: parseIndustries(grant),\n    states: ['national'], // Federal grants are national\n    \n    // Contact\n    contact_email: grant.contactEmail || null,\n    contact_phone: grant.contactPhone || null,\n    \n    // URLs\n    guidelines_url: grant.guidelinesUrl || null,\n    application_form_url: grant.applicationUrl || null,\n    \n    // Metadata\n    last_scraped_at: new Date().toISOString(),\n    data_hash: generateHash(grant)\n  };\n  \n  processedGrants.push({ json: processed });\n}\n\nreturn processedGrants;\n\n// Helper functions\nfunction parseAmount(value) {\n  if (!value) return null;\n  if (typeof value === 'number') return value;\n  const cleaned = String(value).replace(/[^0-9.]/g, '');\n  return cleaned ? parseFloat(cleaned) : null;\n}\n\nfunction parseDate(dateStr) {\n  if (!dateStr || dateStr === 'Ongoing') return null;\n  try {\n    const date = new Date(dateStr);\n    return isNaN(date.getTime()) ? null : date.toISOString().split('T')[0];\n  } catch {\n    return null;\n  }\n}\n\nfunction determineStatus(grant) {\n  if (grant.status) return grant.status.toLowerCase();\n  if (grant.isOngoing || grant.closeDate === 'Ongoing') return 'ongoing';\n  \n  const closeDate = parseDate(grant.closeDate || grant.closingDate);\n  if (closeDate) {\n    const close = new Date(closeDate);\n    const now = new Date();\n    if (close < now) return 'closed';\n    if (close - now < 14 * 24 * 60 * 60 * 1000) return 'closing_soon';\n  }\n  return 'open';\n}\n\nfunction parseIndustries(grant) {\n  const industries = [];\n  if (grant.industries) return grant.industries;\n  if (grant.primaryCategory) industries.push(grant.primaryCategory);\n  if (grant.secondaryCategory) industries.push(grant.secondaryCategory);\n  return industries.length ? industries : ['All Industries'];\n}\n\nfunction generateHash(obj) {\n  const str = JSON.stringify(obj);\n  let hash = 0;\n  for (let i = 0; i < str.length; i++) {\n    const char = str.charCodeAt(i);\n    hash = ((hash << 5) - hash) + char;\n    hash = hash & hash;\n  }\n  return Math.abs(hash).toString(16);\n}"
+      },
+      "id": "process-grants",
+      "name": "Process Grant Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": "public",
+        "table": "grants",
+        "conflictColumns": "external_id,source",
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        }
+      },
+      "id": "upsert-supabase",
+      "name": "Upsert to Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [660, 0],
+      "credentials": {
+        "supabaseApi": {
+          "id": "YOUR_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "scrape_logs",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "source_name": "grantconnect",
+            "status": "success",
+            "grants_found": "={{ $items().length }}",
+            "completed_at": "={{ new Date().toISOString() }}"
+          }
+        }
+      },
+      "id": "log-success",
+      "name": "Log Success",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [880, 0],
+      "credentials": {
+        "supabaseApi": {
+          "id": "YOUR_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "scrape_logs",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "source_name": "grantconnect",
+            "status": "failed",
+            "error_message": "={{ $json.message || 'Unknown error' }}",
+            "completed_at": "={{ new Date().toISOString() }}"
+          }
+        }
+      },
+      "id": "log-error",
+      "name": "Log Error",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [880, 200],
+      "credentials": {
+        "supabaseApi": {
+          "id": "YOUR_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Run Every 6 Hours": {
+      "main": [
+        [
+          {
+            "node": "Fetch GrantConnect API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch GrantConnect API": {
+      "main": [
+        [
+          {
+            "node": "Process Grant Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Grant Data": {
+      "main": [
+        [
+          {
+            "node": "Upsert to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Log Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Kwooka",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "name": "Grants",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "1"
+}

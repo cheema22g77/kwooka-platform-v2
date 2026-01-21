@@ -56,7 +56,7 @@ export default function LoginPage() {
           />
         </div>
         <h1 className="text-2xl font-bold text-slate-900">Welcome Back</h1>
-        <p className="text-muted-foreground mt-1">Sign in to your compliance dashboard</p>
+        <p className="text-muted-foreground mt-1">Sign in to your Kwooka Platform</p>
       </div>
 
       <form onSubmit={handleLogin} className="space-y-4">
